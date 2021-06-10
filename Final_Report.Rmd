@@ -1,0 +1,713 @@
+---
+title: "Pokemon Classification" 
+subtitle: "MSCS 341B, Jaime Davila, Spring 2021" 
+author: "Heriberto Lopez, Sarah Rodman, and Marshall Quist"
+date: "5/21/2021"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(kableExtra)
+library(readxl)
+library(modelr)
+library(caret)
+library(glmnet)
+library(class)
+library(MASS)
+library(tidyverse)
+library(vip) 
+library(readr)
+library(randomForest)
+library(ISLR)
+library(rpart)
+library(rpart.plot)
+
+poke.df <- read_csv(file = "~/Mscs 341b S21/Project/Heri_Sarah_Marshall/data/poke.csv")
+poke.df <- poke.df %>% 
+  filter(capture_rate!= "30 (Meteorite)255 (Core)") %>%
+  mutate(capture_rate = as.numeric(capture_rate))
+Pokemon <- read_excel("~/Mscs 341b S21/Project/Heri_Sarah_Marshall/data/Pokemon.xlsx")
+```
+
+# Introduction 
+
+Since released in 1996 Pokemon has become an instant success spanning seven generations which includes more than 802 Pokemon varying from different types. Initially released as "pocket monsters" in Japan, Pokemon revolves around animal-like characters in conjuction with human trainers competing in battles. One of the most, compelling parts of the franchise show revolves around guessing who a pokemon is based on an outline of it's image. 
+  
+For this project, we wanted to do something similar so our interest is in building models that are able to classify the classification of Pokemon as described by the Sun and Moon Pokedex, using the classification techniques such as KNN, Logistic, LDA, QDA, etc. to classify each Pokemon by there respective type. As well as make accurate classification predictions about the legendary status of each Pokemon. Below are of few of our guiding research questions. 
+
+# Research Questions
+### Can we build a predictive model to classify Pokemon into their types?
+
++ LDA
++ Decision Tree
++ Images
+
+### Can we build a predictive model to determine whether a Pokemon is legendary or not?
+
++ KNN
++ Ridge
+
+
+# Dataset 
+
+```{r,include = FALSE}
+table1 <- tribble( 
+  ~ Variable, ~ Description, ~ type,
+  #------------/---------------/--------------
+  "Classification", "The defined classification type of a pokemon, as defined by the Sun and Moon pokedex (588 unique values", "Categorical", 
+  "is.legendary", "Denotes whether a Pokemon is legendary or not", "Categorical", 
+  "height_m", "The height of the Pokemon in meters","Numeric", 
+  "weight_kg", "The weight of the Pokemon in kilograms", "numeric", 
+  "Capture_rate", "The rate at which the Pokemon is typically captured", "Numeric",
+  "hp", "The total health points","Numeric", 
+  "attack", "The base attack of a Pokemon","Numeric",
+  "defense","The base defense of a Pokemon", "Numeric",
+  "generation","The generation in which the Pokemon was introduced", "Categorical",
+  "Type1", "The primary type of the pokemon","Categorical",
+  "Type2", "The secondary type of the Pokemon", "Categorical", 
+  "sp_attack", "The base special attack of the Pokemon","Numeric",
+  "sp_defense", "The base special defense of the Pokemon", "Numeric",
+  "base_egg_steps", "The experience growth of a Pokemon", "Numeric",
+  "against_[insert type]", "The amount of attack on different types of pokemon there are 18 different types ","Numeric"
+  )
+
+kable1 <-kable(table1) %>%
+  kable_styling(latex_options = "scale_down")
+```
+
+```{r}
+kable1
+```
+*Table 1.*
+
+
+The dataset that we used for our project was pulled from Kaggle. The dataset contained 801 pokemon, and a total of 41 columns of variables for each Pokemon's characteristics. For our modelling purposes, we removed the secondary type of classification of each pokemon since there was a lot of overlap between primary and secondary types which made it difficult to categorize a pokemon into one type. We also removed japanese name category, percentage of sex, as well as height and weight of each pokemon for modelling purposes. There was a total of 70 pokemons that were considered legendary. For classification of type, as we mentioned above since there was two types a primary type and a secondary type we decided to focus on the main primary pokemon classifications - Water, Normal, Bug, Grass and Fire. We created a variable called `typeClass`, which reflected the changes we made and lowered the type classificaton to the five classes mentioned before. In total, we ended up with 114 water, 105 normal, 72 bug, 78 grass, 52 fire and 379 of other types of pokemon. We did remove the other type category we created for part of our analysis. 
+  
+  For part of our modelling, we pulled a different dataset containing pokemon images in png files. The dataset contained 721 images of Pokemon also from the Sun and Moon pokedex, and were converted into matrices and combined in such a way so as the number of rows were the 772 individual pokemon and the columns were the total pixels in the images, 14400. 
+
+```{r, include = FALSE}
+#Summar Statsitics of variables in our dataset 
+str(poke.df)  
+```
+
+```{r,message=FALSE,warninigs=FALSE}
+summary(poke.df)
+```
+
+*Figure 1* Summary statistics for the variables in our refined dataset. 
+
+```{r, include = FALSE}
+
+# log transformed height distributionm 
+ggplot() + 
+  geom_histogram(data = Pokemon, aes(x = log(height_m)), color = "red", fill = "gold") 
+
+# Distribution of hp
+gg1 <- ggplot() + 
+  geom_histogram(data = Pokemon, aes(x = hp), color = "red", fill = "gold") 
+
+#percent of male distribution 
+ggplot() + 
+  geom_histogram(data = Pokemon, aes(x = percentage_male), color = "red", fill = "gold")  
+
+#Distrobution of special attack
+gg2 <- ggplot() + 
+  geom_histogram(data = Pokemon, aes(x = sp_attack), color = "red", fill = "gold") 
+# Distribution of special defense
+gg3 <- ggplot() + 
+  geom_histogram(data = Pokemon, aes(x = sp_defense), color = "red", fill = "gold") 
+# Distribution of speed
+gg4 <- ggplot() + 
+  geom_histogram(data = Pokemon, aes(x = speed), color = "red", fill = "gold") 
+# Distribution of weight in kilograms 
+ggplot() + 
+  geom_histogram(data = Pokemon, aes(x = weight_kg), color = "red", fill = "gold") 
+
+#log transformed
+ggplot() + 
+  geom_histogram(data = Pokemon, aes(x = log(weight_kg)), color = "red", fill = "gold")
+
+gg5 <- ggplot() + 
+  geom_histogram(data = poke.df, aes(x = experience_growth), color = "red", fill = "gold") 
+
+gg6 <- ggplot() + 
+  geom_histogram(data = poke.df, aes(x = capture_rate), color = "red", fill = "gold") 
+
+gg7 <- ggplot() + 
+  geom_histogram(data = poke.df, aes(x = base_egg_steps), color = "red", fill = "gold")  
+
+eda_plots <-grid.arrange(gg1, gg2, gg3, gg4, gg5, gg6, gg7)
+``` 
+
+```{r, message = FALSE, warnings = FALSE}
+grid.arrange(gg1, gg2, gg3, gg4, gg5, gg6, gg7)
+```
+
++ *Figure 2.* Exploratory analysis plots of variables selected variables from our dataset, for the most part all of our variables that were used for the analysis had normal distributions. For those that were not normal, we attempted log transformations. 
+
+
+```{r, include = FALSE}
+tbl1 <- table(Pokemon$generation, Pokemon$is_legendary) %>% addmargins() 
+
+tbl2 <- table(poke.df$generation, poke.df$typeClass) %>%
+  addmargins()
+```
+
+```{r}
+tbl1
+```
++ *Table 2.* The number of legendary pokemon with sums at the marigins, for each generation (1-7 generations).  
+
+# Methods  
+
+## I. Type Classification
+
+### a. Linear Discriminant Analysis (LDA)
+
+  LDA is a method to find linear combinations of predictors which can separate the data into classes. The resulting coefficients can then be used to create a scaling vector which maximizes the ratio of intergroup separation and intragroup variance. This is useful for dimension reduction to then predict the model on the scaled vectors. Since there are around 30 possible predictors, this feature of LDA seemed to make sense. There are 18 types of Pokemon, but the top five types (water, normal, bug, fire, and grass) make up about half of the 801 Pokemon in the dataset. We decided to run the LDA model just on these top five types to see if we could get a more simple model working on just these most common types. We used all predictors in the model, got a scaling vector, scaled all the coefficients for each class, ending up with four alpha values, and then ran another LDA model on the alpha values to get our final MSE.
+
+### b. Decision Tree
+
+  Decision Trees are a method of utilizing trees to make decisions about data. The tree is built on a sequence of decisions about the given predictors, and can be used to make qualitative predictions, or classifications. Another useful aspect of a decision tree is that essentially any type of predictor can be used to build the tree, continous, categorical, or even mixed predictors. The rpart library provides a convenient way to build trees, and also offers control over parameters that can penalize the model for building too complex of a tree, which can lead to overfitting. Since we have multiple types of predictors, and around 30 of them that we are dividing into 18 type categories, the decision tree is a good choice for our data set. After building our initial model, we found the optimal CP parameter, which penalizes overfitting, from the table the model provides, and build an optimal model using this parameter. We then can see the optimal decision tree, and the VIP plot for the model which shows us the most important predictors in making the decisions.
+  
+### c. Images
+
+  For our image process we used singular value decomposition which allowed us to run a linear model everytime we wanted to predict on a new hat,a hat refers to the eigenspace of a particular type - `water`, `fire`,etc. The process of applying singular value decomposition was challenging. Using the image data that we pulled from Kaggle, we began by converting the images into multiple csv files for each image, but quickly found that this method was not ideal. Instead, what we had to do was create a matrix/dataset where the rows are the individual images and the columns are the total number of pixels(721 * 14400). In total, we had 721 images. I created a function that read each image, converted them to greyscale and returned them as a matrix. Then, I used a for loop to combing each image matrix into one matrix by their rows. Finnally, to figure out the type of each Pokemon, I used our pokemon dataset and an *inner_join* function join the datasets by the pokemon name and then removed everything except for their types. We then combined them into one whole dataset with a column for their respective types. Because our dataset was so big. We decided to focus only on projecting `water` onto `fire` space.
+  
+```{r,eval=FALSE}
+#list of all the file name paths (Approximately 721 pokemon images)
+fileNames <- list.files(path = 'C:/images/', pattern = '\\.png', full.names = TRUE) 
+
+#function to write a csv file for each pokemon image as a dataframe
+transfrom_png_row  <- function(file){ 
+  img <- readImage(file)
+  img <- channel(img, "grey") 
+  
+  #obtains name of the name of the pokemon without csv or other 
+  Pokemon_Name <- sub('.png','',basename(file))
+  #creates a matrix with 1 column and observations of all pixels 
+  img_matrix <- matrix(data=img, nrow=1)
+  
+  img.df <- data.frame(name = Pokemon_Name, img_matrix)
+  
+  return(img.df)
+} 
+
+df.1 <- transfrom_png_row(file="C:/images/abomasnow.png")
+
+df.2 <- transfrom_png_row(file="C:/images/pikachu.png")
+  
+
+df.3 <- rbind(df.1, df.2) 
+
+df.all <- transfrom_png_row(file = "C:/images/pikachu.png")
+
+for (file in fileNames){ 
+  df.temp <- transfrom_png_row(file) 
+  df.all <- rbind(df.all, df.temp)
+}
+```
+
+```{r,eval=FALSE}
+water.all <- read_csv(file="~/Mscs 341b S21/Project/Heri_Sarah_Marshall/data/water.csv")
+water.all <- water.all %>% 
+  dplyr::select(-X1)
+
+fire.all <-  read_csv(file="~/Mscs 341b S21/Project/Heri_Sarah_Marshall/data/fire.csv")
+fire.all <- fire.all %>% 
+  dplyr::select(-X1)
+```
+
+```{r,eval=FALSE}
+water.all <- scale(water.all, scale=F)
+fire.all <- scale(fire.all, scale=F)
+
+image.levels <- c("water", "fire")
+```
+
+```{r,eval=FALSE}
+water.frame <- as.data.frame(t(water.all)) %>% 
+  mutate(type =factor("water", levels=image.levels)) 
+
+fire.frame <- as.data.frame(t(fire.all)) %>% 
+  mutate(type = factor("fire", levels = image.levels))
+```
+
+```{r, eval=FALSE}
+all.images.df <- rbind(water.frame, fire.frame)
+```
+
+```{r, eval=FALSE}
+N <- nrow(all.images.df)
+
+train.df <- as.data.frame(sample_n(all.images.df, floor(N/2), rep = F))
+test.df <- as.data.frame(setdiff(all.images.df, train.df))
+
+water.matrix <- train.df %>% 
+  filter(type == "water") %>% 
+  data.matrix() %>% 
+  t()
+
+water.svd <- svd(water.matrix)
+
+uwater <- water.svd$u
+
+hatwater <- uwater %*% t(uwater) 
+
+fire.matrix <- train.df %>% 
+  filter(type == "fire") %>% 
+  data.matrix() %>% 
+  t() 
+
+fire.svd <- svd(grass.matrix) 
+
+ufire <- fire.svd$u 
+
+hatfire <- ufire %*% t(ufire) 
+```
+
+```{r, eval=FALSE}
+test.df <- data.matrix(test.df) 
+
+waterProj <- hatwater %*% test.df[1,]  
+
+fireProj <- hatfire %*% test.df[1,] 
+```
+
+```{r,eval=FALSE}
+waterDist <- mean((test.df[1,]-waterProj)^2)
+fireDist <- mean((test.df[1,]-fireProj)^2) 
+```
+
+```{r, eval=FALSE}
+water.rowSims <- function(row, nameProj){
+  waterProj <- hatwater %*% test.df[row,]
+  waterDist <- mean((test.df[row,]-waterProj)^2)
+return(waterDist)
+}
+
+maxrow <- nrow(test.df)
+
+predswater <- map_dbl(1:maxrow, ~water.rowSims(.x))
+
+
+fire.rowSims <- function(row){
+  fireProj <- hatfire %*% test.df[row,]
+  fireDist <- mean((test.df[row,]-fireProj)^2)
+return(fireDist)
+}
+
+predsfire <- map_dbl(1:maxrow, ~fire.rowSims(.x))
+
+test.df <- data.frame(test.df)
+
+test.df <- as.data.frame(test.df) %>% 
+  mutate(preds = ifelse(predswater < predsfire, "water", "fire" ))
+
+table(test.df$preds, test.df$type) %>%   addmargins()
+
+```
+
+
+## II. Legendary Classification
+### a. KNN with k-fold Cross Validation
+  
+  For our first legendary classification model, we decided to use a 10 fold cross validated KNN model. KNN works by taking in a parameter k, which represents the number of closest neighbors the model takes into account. For a KNN classification, there is a vote in the neighborhood of a points k nearest neighbors, and whichever class has the most in that neighborhood is the class that point is assigned to. We also used a 10 fold cross validation to create our training and testing data sets for the model. Cross validation gives us more ways to reuse the data in creating more combinations of train and test sets, and allows us to tune our k parameter more finely. To do this we wrote 2 simple helper functions and then a map_dbl to use all the folds and possible k values in order to find the optimal parameters. Since there is no penalization in the KNN model, it was seemingly overwhelmed by all the predictors and not as efficient as some of our other models. 
+  
+### b. Ridge Regression
+
+  Next we thought a form of penalized regression might be useful for this problem since there were so many possible predictors. Ridge regression is one type of penalized regression which seeks to minimize the mean squared error with the constraint that the sum of the squares of the coefficients are less than or equal to some parameter $t$. The model will automatically set many unimportant predictors to zero, so the large number of predictors is narrowed down. We used cross validation to get the optimal value of $\lambda$ which is equivalent to $\frac{1}{t}$. Then we ran the model on a test set to get the MSE.  
+
+### c. Random Forest
+
+  The third model we used to make predictions on legendary classification was a method known as random forest. Our main reason of using the random forest method, also known as bagging, is because often our optimal decision trees can be maximized and overfit our data and have a maximal depth. Thus, relatively small changes in the training set that was used for a decision tree can lead to invariably largely distinct looking decision trees. Moreover, random forest allows to use what is called "the wisdom of the crowd" wherein we can control for the error of our collection of maximal trees by averaging the errors out. Using the randomforest library from R programming. We used one-hundered trees in our random forest model, 31 random predictors choosen from our previous Pokemon dataset we created (i.e. poke.df), and used a train and test dataset to model and make predictions.
+
+# Results 
+## I. Type Classification
+
+
+### a. LDA Model
+
+```{r, include=FALSE,message=FALSE,results=FALSE}
+
+poke.four.df<-poke.df %>% 
+  filter(typeClass!=5)
+
+poke.four.df[, 23] <- sapply(poke.four.df[, 23], as.numeric)
+
+N=nrow(poke.four.df)
+train.lda<-sample_n(poke.four.df, ceiling(N/2), replace=F)
+test.lda<-setdiff(poke.four.df, train.lda)
+train.lda<-train.lda[,1:32]
+test.lda<-test.lda[,1:32]
+
+
+mod.lda<-lda(typeClass ~ . , data=train.lda)
+
+preds<-predict(mod.lda,test.lda)
+test.lda <- cbind(test.lda, pred=preds$class)
+
+#with(test.lda,table(typeClass,pred))
+#with(test.lda, mean(typeClass!=pred))
+
+scaling <- mod.lda$scaling
+##scaled so that the length of the scaling vector is 1
+#(scaling <- scaling/sqrt(sum(scaling^2)))
+
+dat.mat <- as.matrix(test.lda[,1:31])
+
+alpha1 <- dat.mat %*% scaling[,1]
+alpha2 <- dat.mat %*% scaling[,2]
+alpha3 <- dat.mat %*% scaling[,3]
+alpha4 <- dat.mat %*% scaling[,4]
+
+test.lda<- test.lda %>% 
+  ##double check that these values are numeric
+  mutate(alpha1=as.numeric(alpha1),
+         alpha2=as.numeric(alpha2),
+         alpha3=as.numeric(alpha3),
+         alpha4=as.numeric(alpha4))
+
+
+#Visualize different pairs
+
+mod.lda2<-lda(typeClass~alpha1+alpha2, data=test.lda)
+
+
+
+gridSize <- 50
+## Get the ranges in x1 and x2
+rng1 <- with(test.lda, range(alpha1))
+rng2 <- with(test.lda, range(alpha2))
+##grid values in x1 and x2 directions
+vals1 <- seq(rng1[1],rng1[2],len=gridSize)
+vals2 <- seq(rng2[1],rng2[2],len=gridSize)
+## Build the grid
+grid.vals <- expand.grid(alpha1=vals1,alpha2=vals2)
+#Pack together as a data frame
+grid.df <- tibble(grid.vals)
+
+preds<-predict(mod.lda2,grid.df)
+grid.df <- cbind(grid.df, pred=preds$class)
+
+
+preds2<-predict(mod.lda2,test.lda)
+test.lda <- cbind(test.lda, pred2=preds2$class)
+with(test.lda,mean(typeClass!=pred2))
+
+```
+
+
+  The final LDA model had an MSE of 0.03. The confusion matrix can be found below in table 3. We see that the model was able to correctly classify most of the Pokemon with no class taking on the obvious majority of the error. A visualization the separation of classes looking at of two of the scaled vectors, alpha1 and alpha2, can be found in Figure 2. You can see that the model and dimension reduction was fairly successful at separating these five classes. The shaded area represents which type the model would predict the Pokemon to be and the points are the actual data with their actual types. 
+
+```{r}
+with(test.lda,table(typeClass,pred2))
+```
+
+*Table 3.*
+
+\newpage
+
+![ ](ldaplot.png)
+
+*Figure 3*
+
+### b. Decision Tree
+  Due to the large number of predictors the pokemon data set has, we decided to make a decision tree to classify by type since we know decision trees are one of the most effective classification methods, especially for complex problems. The fact that decision trees also works with both categorical and continuous predictors helped make our choice to use a decision tree easier. From the results we can see that our optimal decision tree was very effective at classifying pokemon by type, even between all 18 types. With an optimal control parameter of .0044 and a deviance of .172, the decision tree was very accurate. Another aspect of the model to note is the VIP plot of the optimal model. We can see that the type matchups are the most important predictors in creating the splits in the tree. This makes logical sense, as all the types have specific weaknesses to certain other types, so it is a clear place for the model to make its decisions.
+```{r}
+poke2.df <- Pokemon
+poke2.df$type1 <- as.factor(poke2.df$type1)
+poke2.df<-poke2.df %>% 
+  dplyr::select(-pokedex_number, -capture_rate, -classfication, -japanese_name, -type2, -abilities,-name, -percentage_male, -height_m, -weight_kg)
+N <- nrow(poke2.df)
+```
+
+*First Model*
+```{r}
+mod.rpart <- rpart(as.factor(type1) ~ .,
+                   data=poke2.df,
+                   control=list(cp=0.001))
+```
+
+```{r}
+rpart.plot(mod.rpart, box.palette = "blue")
+```
+
+*Figure 4.*
+
+```{r}
+plotcp(mod.rpart)
+```
+
+*Figure 5.*
+
+```{r}
+cpVals <- mod.rpart$cptable
+head(cpVals)
+```
+
+
+```{r}
+(id <- which.min(cpVals[,4]))
+(cpOpt <- cpVals[id,1])
+(errOpt <- cpVals[id, 4])
+```
+
+**Optimal Decision Tree**
+```{r}
+mod.rpart.opt <- rpart(as.factor(type1) ~ .,
+                   data=poke2.df,
+                   control=list(cp=cpOpt))
+```
+
+**Plot of Optimal Decision Tree**
+```{r}
+rpart.plot(mod.rpart.opt)
+```
+
+*Figure 6.*
+
+```{r}
+vip(mod.rpart.opt)
+```
+
+*Figure 7.*
+
+###  c. Images  
+  
+  Once I was able to use singular value decomposition, I had to change course and only focus on two types, since the amount of data in each matrix was taking up storage and crashing my computer. I choose to focus on fire and water and calcualted their respective predcitons using a train and test combo. Overall, the errors that were made were relatively higher than I expected. 
+
+## II. Legendary Classification
+
+### a. KNN Model
+  We chose to create a 10 fold cross validated KNN model for legendary classifciation because from our preliminary data exploration, it did not look as if a linear model would be very effective. However, KNN itself ended up being ineffective compared to our other models, and had by far the highest error rate. One sign of how much this model is struggling is that the optimal number of neighbors is 1, with an optimal error rate of .5, which means the model itself is not even able to form groups of neighbors. The KNN model likely struggled due to the complexity, and large number of attributes each individual pokemon has. We can see later that our more complex models achieve much better results.
+  
+```{r}
+poke_knn.df <- poke.df
+poke_knn.df<-poke_knn.df %>% 
+  dplyr::select(-typeClass)
+
+N <- nrow(poke_knn.df)
+numFolds <- 10
+folds <- sample(1:numFolds, N, rep=T)
+
+doKFold <- function(theFold, folds, k) {
+  train.df <- poke_knn.df %>%
+    filter(folds != theFold)
+  test.df <- poke_knn.df %>%
+    filter(folds == theFold)
+  
+  knn.poke <-knn3(as.factor(is_legendary)~., data=train.df, k=k)
+  
+  test.df <- test.df %>% 
+    add_predictions(knn.poke)
+  with(test.df, mean(pred!=is_legendary))
+}
+
+doKFold(2, folds, 8)
+```
+
+```{r}
+doKFold.mse <- function(numFolds, k){
+  mse <- map_dbl(1:numFolds, ~doKFold(.x, folds, k))
+  mean(mse)
+}
+```
+
+```{r}
+maxKNN <- 100
+maxFolds <- 10
+knn.folds.tbl <- map_dbl(1:maxKNN, ~doKFold.mse(maxFolds, .x))
+
+kNear <- c(1:maxKNN)
+tibble(mse=knn.folds.tbl, kNear=kNear) %>% 
+  ggplot(aes(x = kNear, y = mse))+
+  geom_line()+
+  geom_point()
+```
+
+*Figure 8.*
+
+```{r}
+(opt_k <- kNear[which.min(knn.folds.tbl)])
+(knn_err <- min(knn.folds.tbl))
+```
+
+### b. Ridge Regression
+
+	The first ridge regression model with all of the variables had an MSE of 0.015. The confusion matrix is below in Figure 9. When we looked at the VIP plot (shown in Figure 10), we noticed that almost all of the top 10 variables were the “against” variables which are the measure of how that Pokemon does in battles against that type. 
+
+```{r, results=FALSE,message=FALSE, include=FALSE}
+N=nrow(poke.df)
+train.df=sample_n(poke.df, ceiling(N/2), replace=F)
+test.df=setdiff(poke.df,train.df)
+
+numPreds <- ncol(poke.df)-2
+
+train.x <- data.matrix(train.df[1:nrow(train.df),1:numPreds])
+train.y <- data.matrix(train.df[1:nrow(train.df),-c(1:numPreds,32)])
+test.x <- data.matrix(test.df[1:nrow(test.df),1:numPreds])
+test.y <- data.matrix(test.df[1:nrow(test.df),-c(1:numPreds,32)])
+apply(is.na(train.x), 2, which)
+apply(is.na(test.x), 2, which)
+
+test.x[384,23]=0
+
+lambda.grid=10^seq(-2,3,length=100)
+
+ridge.cv<- cv.glmnet(train.x,train.y,
+                      family="binomial",
+                      lambda=lambda.grid,
+                      type.measure="class",
+                      alpha=0)
+plot(ridge.cv)
+vip(ridge.cv)
+lambda.opt <- ridge.cv$lambda.1se
+id <- with(ridge.cv,which(ridge.cv$lambda==lambda.opt))
+(err.ridge <- ridge.cv$cvm[id])
+
+ridge.opt<- glmnet(train.x,train.y,
+                      family="binomial",
+                      lambda=lambda.opt,
+                      type.measure="class",
+                      alpha=0)
+vip(ridge.opt)
+
+prob.ridge <- predict(ridge.opt,
+                      newx=test.x,
+                      family="binomial",
+                      type="response")
+
+pred.ridge <- ifelse(prob.ridge > 0.5, 1,0)
+```
+
+```{r}
+table(test.y,pred.ridge)
+
+```
+
+*Figure 9.*
+
+```{r}
+vip(ridge.opt)
+```
+
+*Figure 10.*
+
+Then we wanted to try again without those “against” variables to see if the other variables are useful too. The MSE for this model was 0.02 which is pretty similar to the original model. We also show the confusion matrix in Figure 11. By the VIP plot in Figure 12, we see that generation is now the top variable. 
+
+```{r}
+against<-poke.df[,19:31]
+
+against.train<-sample_n(against, floor(nrow(against)/2), rep=F)
+against.test<-setdiff(against, against.train)
+
+numPredsAgainst<-length(against)-1
+ag.train.x<- data.matrix(against.train[1:nrow(against.train),1:numPredsAgainst])
+ag.train.y<- data.matrix(against.train[1:nrow(against.train),-c(1:numPredsAgainst)])
+ag.test.x<- data.matrix(against.test[1:nrow(against.test),1:numPredsAgainst])
+ag.test.y<- data.matrix(against.test[1:nrow(against.test),-c(1:numPredsAgainst)])
+apply(is.na(ag.train.x), 2, which)
+apply(is.na(ag.test.x), 2, which)
+ag.train.x[131,5]=0
+
+
+ridge.cv.against<- cv.glmnet(ag.train.x,ag.train.y,
+                      family="binomial",
+                      lambda=lambda.grid,
+                      type.measure="class",
+                      alpha=0)
+lambda.opt <- ridge.cv.against$lambda.1se
+id <- with(ridge.cv.against,which(ridge.cv.against$lambda==lambda.opt))
+(err.ridge <- ridge.cv.against$cvm[id])
+
+ridge.opt.against<- glmnet(ag.train.x,ag.train.y,
+                      family="binomial",
+                      lambda=lambda.opt,
+                      type.measure="class",
+                      alpha=0)
+
+prob.ridge.against <- predict(ridge.opt.against,
+                      newx=ag.test.x,
+                      family="binomial",
+                      type="response")
+
+pred.ridge.against <- ifelse(prob.ridge.against > 0.5 , 1,0)
+
+
+```
+
+```{r}
+table(ag.test.y,pred.ridge.against)
+```
+
+*Figure 11.*
+
+```{r}
+vip(ridge.opt.against)
+
+```
+
+*Figure 12.*
+
+### c. Random Forest
+  Overall, for our random forest model, our error rate was minimal and misclassified only on two occasions. Both misclassification were on two non-legendary pokemon that were classifed as legendary. Our error rate for the random forrest model was 0.005012531. Relatively, to previous models the model performed well. Using the vip package we note that `base_egg_steps` and `capture_rate` seem to be the most important variables for our random forest decision trees. Both of these variables makes intutive sense. For those familiar with the pokemon franchise one way to obtain legendary pokemons is to maintain their growth beginning with an egg of the pokemon. The eggs take several steps to hatch, and legendary pokemon would most natably be those with higher egg steps. Legendary pokemon are also known for being rare and hard to catch, so capture rate should be a good predictor. 
+  
+```{r, include = FALSE, message=FALSE}
+N <- nrow(poke.df)
+set.seed(10)
+#test and train datasets
+train.df <- sample_n(poke.df,N/2)
+test.df <- setdiff(poke.df,train.df)
+
+numTree <- 100
+numPred <- 31
+
+mod.bag <- randomForest(as.factor(is_legendary) ~ .-is_legendary, 
+                        data=train.df,
+                        ntree=numTree,
+                        mtry=numPred)
+
+test.df <- test.df %>%
+add_predictions(mod.bag)
+```
+
+```{r, include = FALSE,message=FALSE}
+table2 <- with(test.df,table(is_legendary,pred)) 
+
+(err.bag <- with(test.df,mean(is_legendary != pred)))
+
+mod.bag.plot <- plot(mod.bag)
+
+vip.plot <- vip(mod.bag, aesthetics = c(color="red", fill = "gold"))
+```
+
+```{r, message = FALSE}
+table2 
+```
+
+
+*Table 4.* Confusion matrix for predictions 
+
+```{r}
+vip.plot
+```
+
+
+*Figure 13.* Most important predictors calcualted using the vip package for the random forest model. Note that `base_egg_steps` is the most significant predictor in our model. Alogside `base_egg_steps` is `capture_rate`. 
+
+# Discussion/Conclusion 
+  
+  For our type classification models, LDA had the lowest error rate, but only used five types. The decision tree was pretty effective for all 18 types. This is interesting because it shows that those that created the Pokemon and their abilities and statistics and class designation did it in a consistent way. Different types of Pokemon have a detectable pattern of statistics. 
+ There is much more we could do with this problem. For Images we would suggest, if possible perhaps using a different type of color instead of grey scale since images were largely similarly dark, and hard to distinguish, by just the greyscale color. We also think that it would be really cool to attempt this approach using images that are used on the shows' who's that Pokemon challenge where you have to guess the Pokemon based on an outline of what it looks like.  
+ The legendary classification models were also all working pretty well and all had similarly small MSE, with the exception of KNN. This makes sense because legendary Pokemon are supposed to be special and more powerful, so their statistics should probably be differentiable from non-legendary Pokemon. It was also interesting to see which variables were most important. For ridge regression, we found that all of the “against” variables were most important which probably means that legendary Pokemon are more powerful against all types of Pokemon. Also, generation ended up being important when removing the “against” variables which also makes sense because there were more legendary Pokemon in later generations. The random forest model had base egg steps and capture rate as most important. Capture rate is a measure of how difficult the Pokemon is to capture, and legendary Pokemon are generally harder to capture.
+	Overall, both of our research questions were answered with a “yes, we can build models that work pretty well.” It was really interesting to see that the Pokemon stats were created in a really specific way, and Pokemon players would be better off knowing which characteristics are prevalent in different types and what makes a legendary Pokemon different from a regular Pokemon.
+
+From Rstudio. 
+ 
+
+
+
