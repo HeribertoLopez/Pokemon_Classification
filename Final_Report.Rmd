@@ -1,6 +1,6 @@
 ---
 title: "Pokemon Classification" 
-subtitle: "MSCS 341B, Jaime Davila, Spring 2021" 
+subtitle: "MSCS 341B Spring 2021" 
 author: "Heriberto Lopez, Sarah Rodman, and Marshall Quist"
 date: "5/21/2021"
 output: pdf_document
